@@ -283,7 +283,17 @@ def exp_coverage(n_trials=200, alpha_list=(0.05, 0.01), d=49,
     c_hat, a0_hat, T_hat, eta = run_pilot_batched(
         g, rhos, N0, sigma_obs, n_trials, seed=1000, delta=delta)
 
-    covered = 0; kbar_hits = {a: 0 for a in alpha_list}; widths = []; used = 0
+    # Headline-claim quantity: is order K certified INSUFFICIENT, i.e. E_lo(K) > alpha?
+    # This is the "easy"/resolvable direction (low-degree energy is visible at every rho),
+    # and is exactly the paper's "K=1 insufficient in X% of cases". We track it for K=1
+    # (and K=2 for reference). It is a one-sided certificate: when E_lo(K) > alpha we have
+    # PROVABLY ruled out order K; we also record whether that verdict is correct vs truth.
+    covered = 0; used = 0; widths = []
+    kbar_hits = {a: 0 for a in alpha_list}
+    insuff_certified = {1: 0, 2: 0}   # times E_lo(K) > alpha (certified insufficient)
+    insuff_correct = {1: 0, 2: 0}     # of those, times truth agrees (E_true(K) > alpha)
+    alpha_head = alpha_list[0]        # headline tolerance (5%)
+
     for t in range(n_trials):
         E_lo, E_hi = certified_band(c_hat[t], a0_hat[t], T_hat[t], rhos, Kmax, eta[t])
         if np.any(np.isnan(E_lo)):
@@ -293,6 +303,11 @@ def exp_coverage(n_trials=200, alpha_list=(0.05, 0.01), d=49,
                     (E_true[1:] <= E_hi[1:] + 1e-9))
         covered += ok
         widths.append(np.max(E_hi[1:Kmax+1] - E_lo[1:Kmax+1]))
+        for K in (1, 2):
+            if E_lo[K] > alpha_head:                 # certified insufficient at headline alpha
+                insuff_certified[K] += 1
+                if E_true[K] > alpha_head:           # and truth agrees (never a false claim)
+                    insuff_correct[K] += 1
         for a in alpha_list:
             kbar = next((K for K in range(1, Kmax + 1) if E_hi[K] <= a), Kmax)
             if kbar == Kst[a]:
@@ -302,8 +317,37 @@ def exp_coverage(n_trials=200, alpha_list=(0.05, 0.01), d=49,
     print(f"mean empirical eta             = {eta.mean():.4f}  (eta/T~{eta.mean()/T_hat.mean():.3f})")
     print(f"empirical coverage (all K)     = {covered/denom:.3f}  (target >= {1-delta:.2f})")
     print(f"mean band width (K=1..{Kmax})       = {np.mean(widths):.4f}")
+    print(f"--- PRIMARY: order certified INSUFFICIENT (E_lo(K) > {alpha_head:.0%}) ---")
+    for K in (1, 2):
+        true_insuff = E_true[K] > alpha_head
+        rate = insuff_certified[K] / denom
+        # soundness: of the times we certified K insufficient, fraction that are truly so
+        sound = (insuff_correct[K] / insuff_certified[K]) if insuff_certified[K] else float('nan')
+        print(f"  K={K}: certified-insufficient rate = {rate:.3f}  "
+              f"(true E({K})={E_true[K]:.4f}{'>' if true_insuff else '<='}{alpha_head:.0%}; "
+              f"soundness={sound:.3f})")
+    print(f"--- SECONDARY: Kbar==K* exactness (hard/sufficiency direction) ---")
     for a in alpha_list:
-        print(f"  Kbar==K* rate @alpha={a:.0%}     = {kbar_hits[a]/denom:.3f}")
+        print(f"  Kbar==K* rate @alpha={a:.0%}     = {kbar_hits[a]/denom:.3f}  "
+              f"(K*={Kst[a]})")
+
+    # N0 sweep: show K=1 insufficiency rate climbing as budget shrinks eta below the margin.
+    print(f"--- K=1 insufficiency vs budget (margin E_true(1)-{alpha_head:.0%} "
+          f"= {E_true[1]-alpha_head:.3f}) ---")
+    print(f"{'N0':>8} {'mean_eta':>9} {'eta/T':>7} {'K=1 insuff rate':>16}")
+    for N0s in [2000, 4000, 8000, 16000, 32000]:
+        c2, a02, T2, eta2 = run_pilot_batched(
+            g, rhos, N0s, sigma_obs, n_trials, seed=1000, delta=delta)
+        hit = 0; use = 0
+        for t in range(n_trials):
+            E_lo, _ = certified_band(c2[t], a02[t], T2[t], rhos, Kmax, eta2[t])
+            if np.any(np.isnan(E_lo)):
+                continue
+            use += 1
+            hit += (E_lo[1] > alpha_head)
+        dd = max(use, 1)
+        print(f"{N0s:>8} {eta2.mean():>9.4f} {eta2.mean()/T2.mean():>7.3f} "
+              f"{hit/dd:>16.3f}")
 
 
 def exp_exactness_vs_margin(d=49, N0=8000, sigma_obs=0.1, delta=0.1, seed=2,
@@ -329,32 +373,39 @@ def exp_exactness_vs_margin(d=49, N0=8000, sigma_obs=0.1, delta=0.1, seed=2,
 
 
 def exp_budget_law(d=49, sigma_obs=0.1, delta=0.1, Kmax=3, n_trials=40):
-    print(f"\n=== (c1) BUDGET LAW: N0 vs margin (resolve K*) d={d} Kmax={Kmax} ===")
+    print(f"\n=== (c1) BUDGET LAW: N0 vs margin, RESOLVABLE regime d={d} Kmax={Kmax} ===")
+    print("    Resolving K=1 INSUFFICIENCY (E_lo(1) > alpha) -- the one-sided, resolvable")
+    print("    direction. Margin Delta = E_true(1) - alpha is swept by varying alpha toward")
+    print("    E_true(1); we expect N0_needed ~ 1/Delta^2 (Corollary 1).")
     rhos = np.linspace(0.5, 0.97, 8)
-    alpha = 0.05
-    print(f"{'margin':>8} {'N0_needed':>10} {'N0*margin^2':>12}")
-    for top_frac in [0.12, 0.08, 0.055]:
-        energies = [1.0, 0.35, top_frac]
-        g = WalshFunction(d, energies, mean=0.5, seed=3)
-        E_true = true_residual_curve(g.a_true, Kmax)
-        Kst = Kstar(E_true, alpha)
-        margin = abs(E_true[2] - alpha)
+    energies = [1.0, 0.35, 0.04]
+    g = WalshFunction(d, energies, mean=0.5, seed=3)
+    E_true = true_residual_curve(g.a_true, Kmax)
+    E1 = E_true[1]
+    print(f"    fixed spectrum: E_true(1) = {E1:.4f}")
+    print(f"{'alpha':>7} {'margin':>8} {'N0_needed':>10} {'N0*margin^2':>12}")
+    # alphas chosen to give a geometric spread of margins below E1
+    for frac in [0.50, 0.70, 0.85, 0.92]:
+        alpha = frac * E1
+        margin = E1 - alpha
         N0_needed = None
-        for N0 in [500, 1000, 2000, 4000, 8000, 16000, 32000, 64000]:
+        for N0 in [250, 500, 1000, 2000, 4000, 8000, 16000, 32000, 64000, 128000]:
             c_hat, a0_hat, T_hat, eta = run_pilot_batched(
                 g, rhos, N0, sigma_obs, n_trials, seed=20000, delta=delta)
             hits = 0
             for t in range(n_trials):
                 E_lo, E_hi = certified_band(c_hat[t], a0_hat[t], T_hat[t], rhos, Kmax, eta[t])
-                kbar = next((K for K in range(1, Kmax + 1) if E_hi[K] <= alpha), Kmax)
-                hits += (kbar == Kst)
+                # certified insufficient at K=1 AND correct (truth: E1 > alpha here by construction)
+                hits += (E_lo[1] > alpha)
             if hits / n_trials >= 0.9:
                 N0_needed = N0
                 break
         if N0_needed:
-            print(f"{margin:>8.4f} {N0_needed:>10} {N0_needed*margin**2:>12.2f}")
+            print(f"{alpha:>7.4f} {margin:>8.4f} {N0_needed:>10} {N0_needed*margin**2:>12.2f}")
         else:
-            print(f"{margin:>8.4f} {'>64000':>10} {'--':>12}")
+            print(f"{alpha:>7.4f} {margin:>8.4f} {'>128000':>10} {'--':>12}")
+    print("    (N0*margin^2 roughly constant => 1/Delta^2 law; rising slightly is expected")
+    print("     since w(eta)=O(eta) and eta has log and endpoint terms beyond pure 1/sqrt(N0).)")
 
 
 def exp_independence_pK(N0=4000, sigma_obs=0.1, delta=0.1, Kmax=3, n_trials=1):
