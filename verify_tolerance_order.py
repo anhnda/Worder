@@ -83,29 +83,32 @@ class WalshFunction:
     @torch.no_grad()
     def eval(self, Z):
         """Z: (..., d) float tensor in {0,1}. Returns (...) tensor.
-        chi_S(z) = prod_{i in S}(2 z_i - 1). For each term we need the product over
-        its members. We compute it as exp(sum_{i in S} log|s_i|) * sign, but s_i = +-1
-        so |s_i| = 1 and the product is just the parity of (-1) factors among members.
-        => prod = prod_i (s_i)^{member} = exp over members of log(s_i) is undefined for
-        s_i=-1; instead use: signed = (2z-1); term_prod = prod_i signed_i^{member_i}.
-        Implement via: log not safe -> use cumulative product through masking:
-        term_prod = prod over members of signed; do it as
-        prod = exp( member @ 0 ) adjusted -> we use the identity
-        signed^member = 1 - member*(1 - signed) only works for member in {0,1} and
-        signed in {-1,+1}: 1 - member*(1-signed) = signed if member=1 else 1.  Exactly. """
+        chi_S(z) = prod_{i in S}(2 z_i - 1).  Per term, factor_i = signed_i if i in S
+        else 1, via the exact identity  1 - member*(1-signed) = signed if member=1 else 1
+        (valid since member in {0,1}, signed in {+-1}).
+
+        MEMORY-FLAT: we never materialize the (..., n_terms, d) tensor (that was the OOM:
+        it is n_trials*N0*n_terms*d float32). Instead we FOLD over the d feature columns,
+        keeping a running per-term product of shape (..., n_terms). Peak tensor is
+        (..., n_terms); the d axis is consumed one column at a time. d is small (<=~200)
+        so the Python loop over columns is cheap relative to the batch dims."""
         signed = (2.0 * Z - 1.0).to(PILOT_DTYPE)     # (..., d), entries +-1
-        out = torch.full(Z.shape[:-1], self.mean, dtype=PILOT_DTYPE, device=Z.device)
+        lead = Z.shape[:-1]
+        out = torch.full(lead, self.mean, dtype=PILOT_DTYPE, device=Z.device)
         if self.member is None:
             return out
-        # For each term t: factor_i = signed_i if member_{t,i}=1 else 1.
-        # factor = 1 - member*(1 - signed). Then prod over i (last dim).
-        # Z: (..., d) ; member: (n_terms, d). Broadcast over a new term axis.
-        signed_e = signed.unsqueeze(-2)              # (..., 1, d)
-        member_e = self.member                       # (n_terms, d)
-        factor = 1.0 - member_e * (1.0 - signed_e)   # (..., n_terms, d)
-        chi = factor.prod(dim=-1)                     # (..., n_terms)
-        contrib = chi * self.beta                     # (..., n_terms)
-        out = out + contrib.sum(dim=-1)
+        n_terms = self.member.shape[0]
+        # running product over members, shape (..., n_terms), init to ones
+        chi = torch.ones((*lead, n_terms), dtype=PILOT_DTYPE, device=Z.device)
+        for i in range(self.d):
+            mem_i = self.member[:, i]                 # (n_terms,) in {0,1}
+            if not bool(torch.any(mem_i)):
+                continue                              # column i in no term's support
+            s_i = signed[..., i].unsqueeze(-1)        # (..., 1)
+            # factor for this column: s_i where mem_i=1 else 1  ->  1 - mem_i*(1 - s_i)
+            factor_i = 1.0 - mem_i * (1.0 - s_i)      # (..., n_terms)
+            chi = chi * factor_i
+        out = out + (chi * self.beta).sum(dim=-1)
         return out
 
 
@@ -124,11 +127,48 @@ def _coupled(d, rho, shape_lead, gen, device):
     return z, z2
 
 
+def _auto_chunk(n_trials, N0, n_terms, d, device, budget_gib=2.0):
+    """Pick a trial-chunk size so the peak (chunk, N0, n_terms) tensor stays under
+    budget. Several such tensors are live at once (z, signed, chi, y, yp, ...), so
+    we divide the budget by a safety factor. CPU: no need to chunk hard."""
+    if str(device) == "cpu":
+        return n_trials
+    bytes_per = 4  # float32
+    live_tensors = 8  # rough count of simultaneously-live (chunk,N0,*) buffers
+    per_trial = N0 * max(n_terms, d) * bytes_per * live_tensors
+    budget = budget_gib * (1024 ** 3)
+    chunk = max(1, int(budget // max(per_trial, 1)))
+    return min(chunk, n_trials)
+
+
 @torch.no_grad()
-def run_pilot_batched(g, rhos, N0, sigma_obs, n_trials, seed, delta):
-    """Run n_trials pilots at once. Returns numpy arrays (float64):
-       c_hat (n_trials, L), a0_hat (n_trials,), T_hat (n_trials,), eta (n_trials,).
-    eta is the per-trial empirical Bernstein radius (max over estimators)."""
+def run_pilot_batched(g, rhos, N0, sigma_obs, n_trials, seed, delta, chunk=None):
+    """Run n_trials pilots, chunked over the trial axis to bound GPU memory.
+    Returns float64 numpy: c_hat (n_trials,L), a0_hat (n_trials,), T_hat, eta.
+
+    Results are INVARIANT to chunk size: each chunk gets its own generator seeded
+    from (seed, chunk_start), so the random stream a given trial sees does not depend
+    on how trials are grouped."""
+    n_terms = 0 if g.member is None else g.member.shape[0]
+    if chunk is None:
+        chunk = _auto_chunk(n_trials, N0, n_terms, g.d, g.device)
+    parts = {"c": [], "a0": [], "T": [], "eta": []}
+    start = 0
+    while start < n_trials:
+        m = min(chunk, n_trials - start)
+        c, a0, T, eta = _run_pilot_core(
+            g, rhos, N0, sigma_obs, m, seed=seed + start, delta=delta)
+        parts["c"].append(c); parts["a0"].append(a0)
+        parts["T"].append(T); parts["eta"].append(eta)
+        start += m
+    return (np.concatenate(parts["c"], 0), np.concatenate(parts["a0"], 0),
+            np.concatenate(parts["T"], 0), np.concatenate(parts["eta"], 0))
+
+
+@torch.no_grad()
+def _run_pilot_core(g, rhos, N0, sigma_obs, n_trials, seed, delta):
+    """One chunk of n_trials pilots as batched tensor ops. Same return shapes as
+    run_pilot_batched but for this chunk only."""
     device = g.device
     gen = torch.Generator(device=device).manual_seed(int(seed))
     L = len(rhos)
