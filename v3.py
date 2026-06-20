@@ -353,7 +353,10 @@ def dense_fit_queries(d, K):
 # ----------------------------------------------------------------------
 # Experiments
 # ----------------------------------------------------------------------
-RHOS = np.linspace(0.5, 0.97, 8)
+# rho=0 measures s(0)=sum_j a_j(1-0^j)=T directly (the total-energy constraint that
+# v3 was missing); difference estimator stays unbiased at rho=0 (no noise re-injection,
+# unlike product at rho=1).  Cost: 11*N0 -> 12*N0 per (L+2)*N0 accounting.
+RHOS = np.r_[0.0, np.linspace(0.5, 0.97, 8)]
 
 
 def exp_coverage(n_trials=200, d=49, N0=16000, sigma_obs=0.1, delta=0.1, seed=1):
