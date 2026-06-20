@@ -1,8 +1,8 @@
-
 ============================================================================
 HELD-OUT SYNTHETIC  (L4 FROZEN=[np.float64(0.0), np.float64(0.5), np.float64(0.8), np.float64(0.97)]; d=49, alpha=0.05, sigma=0.1, N0=16000)
 ============================================================================
 pilot queries Q = 96,000   trials = 160   (NO grid tuning here)
+radius_mode=empirical (sigma>0 Gaussian noise is unbounded; this is a calibration, not a theorem-exact certificate -- see real_screen for the theorem-exact sigma=0 path).
       scenario  seed  K*     E1   insuf    suf   unres  FALSE-ins  FALSE-suf
  weak-pair-.10    21   2  0.091   0.000  0.000   1.000      0.000      0.000
  weak-pair-.04    22   1  0.038   0.000  0.000   1.000      0.000      0.000
@@ -14,16 +14,19 @@ pure-1-holdout    26   1  0.000   0.000  0.025   0.975      0.000      0.000
 Gate: FALSE-ins and FALSE-suf must be ~0.  pure-1-holdout & weak-pair with E1<=alpha must NOT certify insufficient.
 
 ============================================================================
-REAL SCREENING (sigma=0, output in [0,1], L4 frozen)  d=49, alpha=0.05, N0=16000
+REAL SCREENING (sigma=0, affine output in [0.05,0.95], L4 frozen, theorem radius)  d=49, alpha=0.05, N0=16000
 ============================================================================
-queries per input Q = 80,000   (= (L+1)*N0, self-pair dropped at sigma=0)
-inputs = 50
-          population   insuf    suf   unres   Q/input
-  mostly-1st (E1<=a)   0.740  0.000   0.260    80,000
-          borderline   0.940  0.000   0.060    80,000
-    needs-2nd (E1>a)   1.000  0.000   0.000    80,000
-     high-order tail   1.000  0.000   0.000    80,000
+determinism audit  max|y1-y2| = 0.00e+00  -> skip_selfpair OK
+queries per input Q = 80,000   ((L+1)*N0)   inputs = 50
+          population  meanE1   insuf    suf   unres  FALSE-ins  FALSE-suf   Q/input
+   mostly-1st (E1<a)   0.020   0.000  0.000   1.000      0.000      0.000    80,000
+          just-below   0.037   0.000  0.000   1.000      0.000      0.000    80,000
+          just-above   0.069   0.000  0.000   1.000      0.000      0.000    80,000
+    needs-2nd (E1>a)   0.240   0.420  0.000   0.580      0.000      0.000    80,000
+     high-order tail   0.249   0.780  0.000   0.220      0.000      0.000    80,000
 
 Deliverable per input: {K=1 insufficient | sufficient | unresolved}.
-Wire a real net by replacing DeterministicProbModel.eval with its
-masked forward pass returning the target-class probability in [0,1].
+FALSE-ins / FALSE-suf must be ~0 (now meaningful: affine keeps E1 exact).
+Wire a real net by replacing BoundedWalshProb with an adapter whose .eval
+returns the masked target-class probability in [0,1].
+(xcnn) anhnda@xaibk1:~/Worder$ 
