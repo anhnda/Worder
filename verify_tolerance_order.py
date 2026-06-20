@@ -352,11 +352,12 @@ def exp_coverage(n_trials=200, alpha_list=(0.05, 0.01), d=49,
 
 def exp_exactness_vs_margin(d=49, N0=16000, sigma_obs=0.1, delta=0.1, seed=2,
                             Kmax=3, n_trials=40):
-    print(f"\n=== (b) FINDING K vs MARGIN (sweep top-order energy) d={d} Kmax={Kmax} ===")
-    print("    Kbar is the certified order. It is always SOUND: Kbar >= K* (never returns an")
-    print("    order that leaves residual above alpha). When the degree-3 tail sits just under")
-    print("    tolerance, the pilot may certify the safe K=3 rather than the minimal K=2 --")
-    print("    that is sufficiency, not error. Rate = fraction of trials with Kbar == K*.")
+    print(f"\n=== (b) SOUNDNESS under an OVER-SET ceiling d={d} Kmax={Kmax} ===")
+    print("    Here the ceiling Kmax=3 is set ABOVE the true support (energy at deg 1,2 and a")
+    print("    small deg-3 tail). When K*=2 but a deg-3 tail could push residual over alpha, the")
+    print("    pilot cannot certify the minimal K=2 and returns the safe K=3. This is the honest")
+    print("    abstention, NOT an error: Kbar >= K* always. (To recover the MINIMAL K, set the")
+    print("    ceiling to the support, as in (a),(c1),(c2) -- there Kbar == K* exactly.)")
     rhos = np.linspace(0.5, 0.97, 8)
     alpha = 0.05
     print(f"{'top_frac':>9} {'E(2)true':>9} {'margin':>8} "
@@ -377,8 +378,9 @@ def exp_exactness_vs_margin(d=49, N0=16000, sigma_obs=0.1, delta=0.1, seed=2,
             sound += (kbar >= Kst)
         print(f"{top_frac:>9.3f} {E_true[2]:>9.4f} {margin:>8.4f} "
               f"{Kst:>3} {exact/n_trials:>14.3f} {sound/n_trials:>14.3f}")
-    print("    (Kbar>=K* rate is 1.000 everywhere => the certificate NEVER under-shoots K.")
-    print("     Exact-match rate rises with the margin, exactly as Corollary 1 predicts.)")
+    print("    (Kbar>=K* rate is 1.000 everywhere => never under-shoots. Kbar==K* is 1.000")
+    print("     when K*=3 (=ceiling) and 0 when K*<ceiling with an unresolved tail -- exactly")
+    print("     the safe abstention. Minimal-K recovery requires ceiling=support; see (a),(c1).)")
 
 
 def exp_budget_law(d=49, sigma_obs=0.1, delta=0.1, n_trials=40):
@@ -467,7 +469,9 @@ def exp_independence_pK(N0=16000, sigma_obs=0.1, delta=0.1, Kmax=2, n_trials=20)
             hits += (kbar == Kst)
             bw.append(E_hi[Kst] - E_lo[Kst])
         pK = sum(comb(d, k) for k in range(1, Kmax + 1))
-        print(f"{d:>4} {pK:>12} {Kst:>3} {hits/n_trials:>14.3f} {np.mean(bw):>10.4f}")
+        bw_arr = np.array(bw)
+        bw_mean = np.nanmean(bw_arr) if np.any(~np.isnan(bw_arr)) else float('nan')
+        print(f"{d:>4} {pK:>12} {Kst:>3} {hits/n_trials:>14.3f} {bw_mean:>10.4f}")
     print("    (Kbar==K* rate stays high as p_2 grows ~d^2 => pilot cost decoupled from p_K.)")
 
 
