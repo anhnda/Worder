@@ -166,7 +166,20 @@ def _auto_chunk(n_trials, N0, n_terms, d, device, budget_gib=2.0):
 
 @torch.no_grad()
 def run_pilot_batched(g, rhos, N0, sigma_obs, n_trials, seed, delta, B=None, chunk=None,
-                      skip_selfpair=None):
+                      skip_selfpair=None, radius_mode="empirical", out_range=None):
+    """radius_mode:
+        "empirical" -> Bernstein range term uses the observed sample range of the
+                       per-pair statistic.  This is a CALIBRATION, not a theorem-exact
+                       certificate: the sample range can under-shoot the true range and
+                       make eta optimistically small.  Fine for synthetic exploration.
+        "theorem"   -> Bernstein range term uses the a-priori range of (1/2)(y-y')^2.
+                       For a bounded output in an interval of width out_range, that
+                       statistic lies in [0, 0.5*out_range^2], so the range term is the
+                       guaranteed worst-case.  Use this for any reported certificate.
+       out_range: width of the known output interval (e.g. 1.0 for probabilities in
+                  [0,1]).  Required when radius_mode='theorem'."""
+    if radius_mode == "theorem" and out_range is None:
+        raise ValueError("radius_mode='theorem' requires out_range (e.g. 1.0 for [0,1] outputs)")
     n_terms = 0 if g.member is None else g.member.shape[0]
     if chunk is None:
         chunk = _auto_chunk(n_trials, N0, n_terms, g.d, g.device)
@@ -177,11 +190,23 @@ def run_pilot_batched(g, rhos, N0, sigma_obs, n_trials, seed, delta, B=None, chu
     while start < n_trials:
         m = min(chunk, n_trials - start)
         out = _run_pilot_core(g, rhos, N0, sigma_obs, m, seed + start, delta, B,
-                              skip_selfpair)
+                              skip_selfpair, radius_mode, out_range)
         for k, v in zip(parts, out):
             parts[k].append(v)
         start += m
     return tuple(np.concatenate(parts[k], 0) for k in parts)
+
+
+@torch.no_grad()
+def audit_determinism(g, n=256, seed=0):
+    """Query the SAME mask batch twice and return max |y1 - y2|.  skip_selfpair is
+    only valid (sigma=0 path) when this is 0 at the working precision.  Call before
+    any real run that sets skip_selfpair=True."""
+    device = g.device
+    gen = torch.Generator(device=device).manual_seed(int(seed))
+    z = torch.randint(0, 2, (n, g.d), generator=gen, device=device, dtype=PILOT_DTYPE)
+    d = (g.eval(z) - g.eval(z)).abs().max().item()
+    return d
 
 
 @torch.no_grad()
@@ -194,7 +219,8 @@ def _coupled_from_base(z, rho, gen, device):
 
 
 @torch.no_grad()
-def _run_pilot_core(g, rhos, N0, sigma_obs, n_trials, seed, delta, B, skip_selfpair=False):
+def _run_pilot_core(g, rhos, N0, sigma_obs, n_trials, seed, delta, B, skip_selfpair=False,
+                    radius_mode="empirical", out_range=None):
     """DIFFERENCE estimator (A) + SHARED base mask (B).
 
     Per pair we form d_t = (y - y')^2 / 2.  Then
@@ -203,7 +229,12 @@ def _run_pilot_core(g, rhos, N0, sigma_obs, n_trials, seed, delta, B, skip_selfp
     If skip_selfpair (deterministic model, sigma=0): no noise floor, s_hat = s_raw
     directly, no self-pair query.  Otherwise estimate sigma^2 from a rho=1 self-pair
     (z queried twice under independent noise): (y1-y2)^2/2 has mean sigma^2 (g cancels),
-    and subtract it.  a_0 NEVER enters.  Returns (per-trial, float64):
+    and subtract it.  a_0 NEVER enters.
+
+    radius_mode='theorem': the Bernstein range term uses the a-priori range of the
+    statistic (1/2)(y-y')^2, which for a bounded output of width out_range is
+    0.5*out_range^2 -- the guaranteed worst case.  radius_mode='empirical' uses the
+    observed sample range (a calibration, may under-shoot).  Returns (per-trial f64):
         s_hat (n,L), eta_s (n,L).
     """
     device = g.device
@@ -215,8 +246,22 @@ def _run_pilot_core(g, rhos, N0, sigma_obs, n_trials, seed, delta, B, skip_selfp
     M_terms = L if skip_selfpair else L + 1
     log_term = float(np.log(2.0 * M_terms / delta))
 
-    def bernstein(std, rng):  # empirical-Bernstein for a bounded/sub-exp mean
+    # a-priori range of (1/2)(y-y')^2 when output lies in an interval of width out_range.
+    # Noise (sigma>0) is unbounded Gaussian, so the theorem range is only valid in the
+    # deterministic/bounded case; guard against silent misuse.
+    theorem_rng = None
+    if radius_mode == "theorem":
+        if out_range is None:
+            raise ValueError("theorem mode needs out_range")
+        if sigma_obs > 0.0:
+            raise ValueError("theorem range is for bounded (sigma=0) outputs; Gaussian "
+                             "noise is unbounded -- use a sub-exponential bound or "
+                             "radius_mode='empirical' (calibration).")
+        theorem_rng = 0.5 * float(out_range) ** 2
+
+    def bernstein(std, sample_rng):
         var = std ** 2
+        rng = theorem_rng if radius_mode == "theorem" else sample_rng
         return torch.sqrt(2.0 * var * log_term / N0) + (rng * log_term) / (3.0 * N0)
 
     # ---- (B) ONE shared base mask z, queried ONCE ----
