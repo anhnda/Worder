@@ -372,40 +372,48 @@ def exp_exactness_vs_margin(d=49, N0=8000, sigma_obs=0.1, delta=0.1, seed=2,
               f"{Kst:>3} {kbar:>5} {bw2:>9.4f} {str(kbar==Kst):>7}")
 
 
-def exp_budget_law(d=49, sigma_obs=0.1, delta=0.1, Kmax=3, n_trials=40):
-    print(f"\n=== (c1) BUDGET LAW: N0 vs margin, RESOLVABLE regime d={d} Kmax={Kmax} ===")
-    print("    Resolving K=1 INSUFFICIENCY (E_lo(1) > alpha) -- the one-sided, resolvable")
-    print("    direction. Margin Delta = E_true(1) - alpha is swept by varying alpha toward")
-    print("    E_true(1); we expect N0_needed ~ 1/Delta^2 (Corollary 1).")
+def exp_budget_law(d=49, sigma_obs=0.1, delta=0.1, n_trials=40):
+    print(f"\n=== (c1) BUDGET LAW: N0 ~ 1/Delta^2 on a RESOLVABLE crossing d={d} ===")
+    print("    Construction: spectrum with energy ONLY at degrees 1 and 2 (no tail above 2),")
+    print("    Kmax=2 so there is nowhere to hide energy and the band is well-conditioned.")
+    print("    We resolve the K=1 SUFFICIENCY crossing E_hi(1) <= alpha, and sweep the true")
+    print("    margin Delta = |E_true(1) - alpha| by varying the degree-2 energy a2.")
+    print("    Corollary 1 predicts N0_needed ~ 1/Delta^2, i.e. N0*Delta^2 ~ const.")
+    Kmax = 2
     rhos = np.linspace(0.5, 0.97, 8)
-    energies = [1.0, 0.35, 0.04]
-    g = WalshFunction(d, energies, mean=0.5, seed=3)
-    E_true = true_residual_curve(g.a_true, Kmax)
-    E1 = E_true[1]
-    print(f"    fixed spectrum: E_true(1) = {E1:.4f}")
-    print(f"{'alpha':>7} {'margin':>8} {'N0_needed':>10} {'N0*margin^2':>12}")
-    # alphas chosen to give a geometric spread of margins below E1
-    for frac in [0.50, 0.70, 0.85, 0.92]:
-        alpha = frac * E1
-        margin = E1 - alpha
+    alpha = 0.10
+    print(f"{'a2':>6} {'E1_true':>8} {'margin':>8} {'N0_needed':>10} {'N0*margin^2':>12}")
+    # a2 chosen so E_true(1)=a2/(1+a2) sits BELOW alpha (so K=1 is truly sufficient) with
+    # a range of margins; smaller margin (a2 closer to the crossing) should cost ~1/Delta^2 more.
+    for a2 in [0.05, 0.065, 0.08, 0.095]:
+        energies = [1.0, a2]            # degrees 1 and 2 only; no degree-3 tail
+        g = WalshFunction(d, energies, mean=0.5, seed=3)
+        E_true = true_residual_curve(g.a_true, Kmax)
+        E1 = E_true[1]
+        margin = abs(E1 - alpha)
+        if E1 > alpha:
+            # crossing on wrong side -> K=1 not sufficient; skip (would resolve insufficiency instead)
+            print(f"{a2:>6.3f} {E1:>8.4f} {margin:>8.4f} {'(E1>a)':>10} {'--':>12}")
+            continue
         N0_needed = None
         for N0 in [250, 500, 1000, 2000, 4000, 8000, 16000, 32000, 64000, 128000]:
             c_hat, a0_hat, T_hat, eta = run_pilot_batched(
                 g, rhos, N0, sigma_obs, n_trials, seed=20000, delta=delta)
             hits = 0
             for t in range(n_trials):
-                E_lo, E_hi = certified_band(c_hat[t], a0_hat[t], T_hat[t], rhos, Kmax, eta[t])
-                # certified insufficient at K=1 AND correct (truth: E1 > alpha here by construction)
-                hits += (E_lo[1] > alpha)
+                _, E_hi = certified_band(c_hat[t], a0_hat[t], T_hat[t], rhos, Kmax, eta[t])
+                hits += (E_hi[1] <= alpha)        # K=1 certified sufficient
             if hits / n_trials >= 0.9:
                 N0_needed = N0
                 break
         if N0_needed:
-            print(f"{alpha:>7.4f} {margin:>8.4f} {N0_needed:>10} {N0_needed*margin**2:>12.2f}")
+            print(f"{a2:>6.3f} {E1:>8.4f} {margin:>8.4f} {N0_needed:>10} "
+                  f"{N0_needed*margin**2:>12.2f}")
         else:
-            print(f"{alpha:>7.4f} {margin:>8.4f} {'>128000':>10} {'--':>12}")
-    print("    (N0*margin^2 roughly constant => 1/Delta^2 law; rising slightly is expected")
-    print("     since w(eta)=O(eta) and eta has log and endpoint terms beyond pure 1/sqrt(N0).)")
+            print(f"{a2:>6.3f} {E1:>8.4f} {margin:>8.4f} {'>128000':>10} {'--':>12}")
+    print("    (N0*margin^2 roughly constant down the column => 1/Delta^2 law holds in the")
+    print("     resolvable regime. Contrast (a): K=2-at-5% has a hidden degree-3 tail and is")
+    print("     NOT resolvable at any budget -- that asymmetry is the real finding.)")
 
 
 def exp_independence_pK(N0=4000, sigma_obs=0.1, delta=0.1, Kmax=3, n_trials=1):
