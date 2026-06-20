@@ -1,0 +1,31 @@
+==============================================================================
+PHASE A SMOKE TEST  ResNet-50  ref=white  N0=16000  alpha=0.05
+  confidence_scope=per_input  delta_global=0.1
+  (these 5 images are EXCLUDED from the primary study)
+==============================================================================
+ img   tgt    pmin    pmax  audit|y1-y2|   feas        verdict   T_hat    h1_lo    h1_hi          Q
+   0     0   0.305   0.992      0.00e+00     ok         insuff   0.013    0.004    0.013     81,024
+   1    69   0.018   0.997      0.00e+00     ok         insuff   0.030    0.006    0.027     81,024
+   2    85   0.001   0.982      0.00e+00     ok         insuff   0.082    0.007    0.039     81,024
+   3   114   0.107   0.997      0.00e+00     ok         insuff   0.028    0.009    0.027     81,024
+   4   120   0.302   0.984      0.00e+00     ok         insuff   0.022    0.006    0.021     81,024
+
+Checks: pmin>=0 & pmax<=1; audit|y1-y2|==0 (else skip_selfpair UNSAFE);
+feas=ok; Q ~ (L+1)*N0 + audit. If audit!=0, fall back to self-pair branch.
+Smoke test only -- results NOT reported in the study.
+(xcnn) anhnda@xaibk1:~/Worder$ python phase_a_resnet.py --images benchmark_50/ --reference black
+==============================================================================
+PHASE A SMOKE TEST  ResNet-50  ref=black  N0=16000  alpha=0.05
+  confidence_scope=per_input  delta_global=0.1
+  (these 5 images are EXCLUDED from the primary study)
+==============================================================================
+ img   tgt    pmin    pmax  audit|y1-y2|   feas        verdict   T_hat    h1_lo    h1_hi          Q
+   0     0   0.371   0.940      0.00e+00     ok         insuff   0.008    0.002    0.007     81,024
+   1    69   0.049   0.981      0.00e+00     ok         insuff   0.019    0.004    0.018     81,024
+   2    85   0.003   0.963      0.00e+00     ok         insuff   0.059    0.008    0.033     81,024
+   3   114   0.061   0.990      0.00e+00     ok         insuff   0.025    0.007    0.023     81,024
+   4   120   0.287   0.941      0.00e+00     ok         insuff   0.016    0.002    0.011     81,024
+
+Checks: pmin>=0 & pmax<=1; audit|y1-y2|==0 (else skip_selfpair UNSAFE);
+feas=ok; Q ~ (L+1)*N0 + audit. If audit!=0, fall back to self-pair branch.
+Smoke test only -- results NOT reported in the study.
