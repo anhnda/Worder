@@ -118,6 +118,8 @@ def run_primary(image_dir, n_img, out_csv, models, refs, N0=16000, alpha=0.05,
     print(f"\n### shared image set: {len(shared)} paths (fixed seed, smoke excluded)")
     del sel_model
 
+    total_cells = len(models) * len(refs) * len(scopes)
+    cell_i = 0
     for mname in models:
         model, weights = build_model(mname)
         Adapter = adapter_for(mname)
@@ -128,12 +130,18 @@ def run_primary(image_dir, n_img, out_csv, models, refs, N0=16000, alpha=0.05,
 
         for ref in refs:
             for scope, delta_per in scopes.items():
+                cell_i += 1
                 rows = []
                 t0 = time.time()
+                cell_total = len(imgs)
+                print(f"  -> [cell {cell_i}/{total_cells}] {mname}/{ref}/{scope}: "
+                      f"{cell_total} images", flush=True)
                 for idx, (path, x_cpu, tgt) in enumerate(imgs):
                     key = (mname, ref, scope, str(idx))
                     if key in done:
+                        print(f"     [{idx+1:>2}/{cell_total}] cached", flush=True)
                         continue
+                    ti = time.time()
                     ctr = QueryCounter()
                     ad = Adapter(x_cpu.to(DEVICE), tgt, reference=ref, counter=ctr)
 
@@ -141,8 +149,8 @@ def run_primary(image_dir, n_img, out_csv, models, refs, N0=16000, alpha=0.05,
                     dd = audit_determinism(ad, n=256, seed=idx)
                     ctr.audit += (ctr.pilot - before); ctr.pilot = before
                     if dd != 0.0:
-                        print(f"  !! {mname}/{ref}/{scope} img{idx}: NON-deterministic "
-                              f"(|y1-y2|={dd:.2e}); skipped.")
+                        print(f"     [{idx+1:>2}/{cell_total}] NON-deterministic "
+                              f"(|y1-y2|={dd:.2e}); skipped.", flush=True)
                         continue
 
                     before = ctr.pilot
@@ -160,6 +168,11 @@ def run_primary(image_dir, n_img, out_csv, models, refs, N0=16000, alpha=0.05,
                                Q_pilot=ctr.pilot, Q_audit=ctr.audit)
                     writer.writerow(row); fh.flush()
                     rows.append(row)
+                    dt = time.time() - ti
+                    eta_left = dt * (cell_total - idx - 1)
+                    print(f"     [{idx+1:>2}/{cell_total}] {r['verdict']:>6}  "
+                          f"T={r['T_hat']:.4f}  h1=[{r['h1_lo']:.4f},{r['h1_hi']:.4f}]  "
+                          f"{dt:.1f}s  (~{eta_left:.0f}s left in cell)", flush=True)
                 _summary(mname, ref, scope, rows, time.time() - t0)
     fh.close()
     print(f"\nWrote {out_csv}.  Use it for Phase C independent validation.")
