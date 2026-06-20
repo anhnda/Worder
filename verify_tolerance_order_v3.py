@@ -165,15 +165,19 @@ def _auto_chunk(n_trials, N0, n_terms, d, device, budget_gib=2.0):
 
 
 @torch.no_grad()
-def run_pilot_batched(g, rhos, N0, sigma_obs, n_trials, seed, delta, B=None, chunk=None):
+def run_pilot_batched(g, rhos, N0, sigma_obs, n_trials, seed, delta, B=None, chunk=None,
+                      skip_selfpair=None):
     n_terms = 0 if g.member is None else g.member.shape[0]
     if chunk is None:
         chunk = _auto_chunk(n_trials, N0, n_terms, g.d, g.device)
+    if skip_selfpair is None:
+        skip_selfpair = (sigma_obs == 0.0)   # deterministic model: no noise floor to subtract
     parts = {"s": [], "es": []}
     start = 0
     while start < n_trials:
         m = min(chunk, n_trials - start)
-        out = _run_pilot_core(g, rhos, N0, sigma_obs, m, seed + start, delta, B)
+        out = _run_pilot_core(g, rhos, N0, sigma_obs, m, seed + start, delta, B,
+                              skip_selfpair)
         for k, v in zip(parts, out):
             parts[k].append(v)
         start += m
@@ -190,16 +194,16 @@ def _coupled_from_base(z, rho, gen, device):
 
 
 @torch.no_grad()
-def _run_pilot_core(g, rhos, N0, sigma_obs, n_trials, seed, delta, B):
+def _run_pilot_core(g, rhos, N0, sigma_obs, n_trials, seed, delta, B, skip_selfpair=False):
     """DIFFERENCE estimator (A) + SHARED base mask (B).
 
     Per pair we form d_t = (y - y')^2 / 2.  Then
         E[d] = (1/2) E[(g(z)-g(z'))^2] + sigma^2
              = sum_{j>=1} a_j (1 - rho^j)  +  sigma^2  =:  s_raw(rho).
-    We estimate sigma^2 from a rho=1 self-pair (z queried twice under independent
-    noise): (y1 - y2)^2 / 2 has mean sigma^2 exactly (g cancels).  Subtract it:
-        s_hat(rho) = s_raw_hat(rho) - sig2_hat   ->  E ~ sum_j a_j (1 - rho^j).
-    a_0 NEVER enters.  Returns (per-trial, float64):
+    If skip_selfpair (deterministic model, sigma=0): no noise floor, s_hat = s_raw
+    directly, no self-pair query.  Otherwise estimate sigma^2 from a rho=1 self-pair
+    (z queried twice under independent noise): (y1-y2)^2/2 has mean sigma^2 (g cancels),
+    and subtract it.  a_0 NEVER enters.  Returns (per-trial, float64):
         s_hat (n,L), eta_s (n,L).
     """
     device = g.device
@@ -207,8 +211,8 @@ def _run_pilot_core(g, rhos, N0, sigma_obs, n_trials, seed, delta, B):
     L = len(rhos)
     lead = (n_trials, N0)
 
-    # union bound over L overlaps + 1 sigma^2 estimator; two-sided
-    M_terms = L + 1
+    # union bound: L overlaps (+1 sigma^2 estimator unless skipped); two-sided
+    M_terms = L if skip_selfpair else L + 1
     log_term = float(np.log(2.0 * M_terms / delta))
 
     def bernstein(std, rng):  # empirical-Bernstein for a bounded/sub-exp mean
@@ -217,33 +221,36 @@ def _run_pilot_core(g, rhos, N0, sigma_obs, n_trials, seed, delta, B):
 
     # ---- (B) ONE shared base mask z, queried ONCE ----
     z = torch.randint(0, 2, (*lead, g.d), generator=gen, device=device, dtype=PILOT_DTYPE)
-    y = g.eval(z) + sigma_obs * torch.randn(lead, generator=gen, device=device)  # base query
+    base = g.eval(z)
+    y = base if skip_selfpair else base + sigma_obs * torch.randn(lead, generator=gen, device=device)
 
     s_hat = torch.empty((n_trials, L), dtype=PILOT_DTYPE, device=device)
     s_std = torch.empty((n_trials, L), dtype=PILOT_DTYPE, device=device)
     s_rng = torch.empty((n_trials, L), dtype=PILOT_DTYPE, device=device)
     for l, rho in enumerate(rhos):
         z2 = _coupled_from_base(z, float(rho), gen, device)
-        yp = g.eval(z2) + sigma_obs * torch.randn(lead, generator=gen, device=device)
+        gp = g.eval(z2)
+        yp = gp if skip_selfpair else gp + sigma_obs * torch.randn(lead, generator=gen, device=device)
         diff = 0.5 * (y - yp) ** 2                       # (n,N0)
         s_hat[:, l] = diff.mean(dim=1)
         s_std[:, l] = diff.std(dim=1)
         s_rng[:, l] = diff.amax(dim=1) - diff.amin(dim=1)
 
-    # ---- sigma^2 estimate: rho=1 self-pair, g cancels ----
-    y2 = g.eval(z) + sigma_obs * torch.randn(lead, generator=gen, device=device)  # 2nd noisy read of SAME z
-    sdiff = 0.5 * (y - y2) ** 2                            # mean = sigma^2
-    sig2_hat = sdiff.mean(dim=1, keepdim=True)             # (n,1)
-    sig2_std = sdiff.std(dim=1, keepdim=True)
-    sig2_rng = (sdiff.amax(dim=1) - sdiff.amin(dim=1)).unsqueeze(1)
-
-    # subtract the known-form additive bias
-    s_hat = s_hat - sig2_hat                               # (n,L), now ~ sum_j a_j(1-rho^j)
-
-    # radii: per-overlap Bernstein + sigma^2-subtraction radius (conservative sum)
     eta_raw = bernstein(s_std, s_rng)                                   # (n,L)
-    eta_sig = bernstein(sig2_std, sig2_rng)                             # (n,1)
-    eta_s = eta_raw + eta_sig                                           # broadcast (n,L)
+
+    if skip_selfpair:
+        # deterministic: s_hat is already sum_j a_j(1-rho^j); only sampling radius
+        eta_s = eta_raw
+    else:
+        # ---- sigma^2 estimate: rho=1 self-pair, g cancels ----
+        y2 = base + sigma_obs * torch.randn(lead, generator=gen, device=device)
+        sdiff = 0.5 * (y - y2) ** 2                        # mean = sigma^2
+        sig2_hat = sdiff.mean(dim=1, keepdim=True)         # (n,1)
+        sig2_std = sdiff.std(dim=1, keepdim=True)
+        sig2_rng = (sdiff.amax(dim=1) - sdiff.amin(dim=1)).unsqueeze(1)
+        s_hat = s_hat - sig2_hat                            # (n,L)
+        eta_sig = bernstein(sig2_std, sig2_rng)            # (n,1)
+        eta_s = eta_raw + eta_sig                          # broadcast (n,L)
 
     to64 = lambda t: t.detach().to("cpu").double().numpy()
     return to64(s_hat), to64(eta_s)
