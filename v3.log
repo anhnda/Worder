@@ -1,0 +1,35 @@
+python v3.py 
+^[[A
+=== (a) COVERAGE (honest Kmax=d)  d=49 N0=16000 sigma=0.1 delta=0.1 dev=cuda ===
+    spectrum a_1..a_3 = [1.   0.35 0.04]   T=1.3900
+    true residual E(1..3) = [0.2806 0.0288 0.    ]   K*_5% = 2
+    pilot total queries Q = 176,000   |  dense-fit floor: p1=50, p2=1226, p3=19,650
+    --- (#1) true-spectrum feasibility rate = 0.995 (target >= 0.90) ---
+    K=1 certified INSUFFICIENT rate = 0.985  (soundness = 1.000; FALSE-sufficient = 0)
+    certified Kbar == K* (=2) rate = 0.000
+
+=== (b) BUDGET LAW: K=1 insufficiency vs N0 (honest Kmax=d) E_true(1)=0.2806 margin=0.2306 ===
+      N0            Q  mean eta_s  K=1 insuff  false-suff
+    2000       22,000      0.0681       0.000           0
+    4000       44,000      0.0472       0.037           0
+    8000       88,000      0.0326       0.388           0
+   16000      176,000      0.0228       0.975           0
+   32000      352,000      0.0159       1.000           0
+    (false-suff must stay 0; insuff -> 1.  Compare Q to dense p2=1226, p3=19,650.)
+
+=== (c) ORACLE-SUPPORT ABLATION (Kmax = support; not the honest setting) ===
+    Tail-fraction sweep; ceiling set to true max degree. (#2: appendix only.)
+ tail_a3  K*  Kmax  Kbar==K*  Kbar>=K*  unresolved          Q
+   0.300   3     3     1.000     1.000       0.000    176,000
+   0.100   3     3     1.000     1.000       0.000    176,000
+   0.040   2     3     0.000     1.000       0.000    176,000
+   0.000   2     2     1.000     1.000       0.000    176,000
+    (Kbar>=K* among resolved == 1.000 => never undershoots; unresolved is honest abstention, not error.)
+
+=== (d) PILOT Q vs DENSE-FIT FLOOR as d grows (fixed N0=16000) ===
+    d        p2          p3    pilot Q  K=1 insuff  pilot<p3?
+   25       326       2,626    176,000       1.000      False
+   49     1,226      19,650    176,000       0.950      False
+  100     5,051     166,751    176,000       1.000      False
+  196    19,307   1,255,087    176,000       1.000       True
+    (Pilot Q is FIXED; p3 grows ~d^3. The pilot only *wins* on cost once p_K overtakes Q -- shown, not assumed.)
