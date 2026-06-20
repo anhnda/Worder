@@ -1,0 +1,71 @@
+                                                                                                                                                                                                                   
+==============================================================================                                                                                                                                     
+STRESS TEST  (honest Kmax=d; false rates MUST stay ~0)                                                                                                                                                             
+==============================================================================                                                                                                                                     
+                                                                                                                                                                                                                   
+[1] Scenario sweep  (d=49, alpha=5%, sigma=0.1, N0=16k)                                                                                                                                                            
+    scenario    d     a   sig      N0         Q   feas  Kbar=K*  K1-insuf  FALSE-ins  FALSE-suf  K*     E1                                                                                                         
+      pure-1   49  0.05  0.10   16000   176,000  1.000    0.017     0.000      0.000      0.000   1  0.000                                                                                                         
+       deg-2   49  0.05  0.10   16000   176,000  0.992    0.000     0.533      0.000      0.000   2  0.259                                                                                                         
+  deg-3-tail   49  0.05  0.10   16000   176,000  0.992    0.000     0.933      0.000      0.000   2  0.281                                                                                                         
+^[[B    rare-int   49  0.05  0.10   16000   176,000  1.000    0.000     0.067      0.000      0.000   2  0.167                                                                                                     
+                                                                                                                                                                                                                   
+[2] alpha sweep  (deg-3-tail, d=49, sigma=0.1, N0=16k)                                                                                                                                                             
+    scenario    d     a   sig      N0         Q   feas  Kbar=K*  K1-insuf  FALSE-ins  FALSE-suf  K*     E1                                                                                                         
+  deg-3-tail   49  0.01  0.10   16000   176,000  1.000    0.000     1.000      0.000      0.000   3  0.281                                                                                                         
+  deg-3-tail   49  0.05  0.10   16000   176,000  1.000    0.000     0.933      0.000      0.000   2  0.281                                                                                                         
+  deg-3-tail   49  0.10  0.10   16000   176,000  1.000    0.000     0.017      0.000      0.000   2  0.281                                                                                                         
+                                                                                                                                                                                                                   
+[3] sigma sweep  (deg-3-tail, d=49, alpha=5%, N0=16k)                                                                                                                                                              
+    scenario    d     a   sig      N0         Q   feas  Kbar=K*  K1-insuf  FALSE-ins  FALSE-suf  K*     E1                                                                                                         
+  deg-3-tail   49  0.05  0.05   16000   176,000  0.983    0.000     0.942      0.000      0.000   2  0.281                                                                                                         
+  deg-3-tail   49  0.05  0.10   16000   176,000  0.983    0.000     0.900      0.000      0.000   2  0.281                                                                                                         
+  deg-3-tail   49  0.05  0.20   16000   176,000  0.992    0.000     0.775      0.000      0.000   2  0.281                                                                                                         
+  deg-3-tail   49  0.05  0.40   16000   176,000  1.000    0.000     0.367      0.000      0.000   2  0.281                                                                                                         
+                                                                                                                                                                                                                   
+[4] d sweep  (deg-3-tail, alpha=5%, sigma=0.1, N0=16k)                                                                                                                                                             
+    scenario    d     a   sig      N0         Q   feas  Kbar=K*  K1-insuf  FALSE-ins  FALSE-suf  K*     E1                                                                                                         
+  deg-3-tail   25  0.05  0.10   16000   176,000  1.000    0.000     0.933      0.000      0.000   2  0.281
+  deg-3-tail   49  0.05  0.10   16000   176,000  1.000    0.000     0.958      0.000      0.000   2  0.281
+  deg-3-tail  100  0.05  0.10   16000   176,000  1.000    0.000     1.000      0.000      0.000   2  0.281
+  deg-3-tail  196  0.05  0.10   16000   176,000  0.992    0.000     0.950      0.000      0.000   2  0.281
+
+[5] budget sweep  (deg-3-tail, d=49, alpha=5%, sigma=0.1)
+    scenario    d     a   sig      N0         Q   feas  Kbar=K*  K1-insuf  FALSE-ins  FALSE-suf  K*     E1
+  deg-3-tail   49  0.05  0.10    2000    22,000  1.000    0.000     0.000      0.000      0.000   2  0.281
+  deg-3-tail   49  0.05  0.10    4000    44,000  0.992    0.000     0.008      0.000      0.000   2  0.281
+
+  deg-3-tail   49  0.05  0.10    8000    88,000  1.000    0.000     0.217      0.000      0.000   2  0.281
+  deg-3-tail   49  0.05  0.10   16000   176,000  0.992    0.000     0.950      0.000      0.000   2  0.281
+  deg-3-tail   49  0.05  0.10   32000   352,000  0.992    0.000     1.000      0.000      0.000   2  0.281
+  deg-3-tail   49  0.05  0.10   64000   704,000  0.992    0.000     1.000      0.000      0.000   2  0.281
+
+Readout: FALSE-ins and FALSE-suf must be ~0 everywhere (bounded by delta). pure-1 must show K1-insuf=0 AND FALSE-ins=0.
+
+==============================================================================
+GRID ABLATION  (matched total Q=200,000; N0=Q//(L+2); rho=0 always)
+==============================================================================
+Objective: maximize K=1-insuff rate on deg-3-tail at fixed Q, FALSE~0.
+      grid   L      N0    Q_real   feas  Kbar=K*  K1-insuf  FALSE-ins  FALSE-suf  meanRho
+        L4   4   33333   199,998  0.992    0.000     1.000      0.000      0.000    0.568
+        L6   6   25000   200,000  0.983    0.000     1.000      0.000      0.000    0.612
+        L9   9   18181   199,991  1.000    0.000     0.958      0.000      0.000    0.653
+  L6-near1   6   25000   200,000  0.992    0.000     1.000      0.000      0.000    0.665
+  L9-near1   9   18181   199,991  0.992    0.000     0.933      0.000      0.000    0.714
+
+  -> best grid at Q=200,000: L4 (K1-insuf=1.000, FALSE rates within delta)
+  (Grids pushing nearer rho=1 sharpen high-degree separation but lose SNR there; matched-Q picks the winner empirically.)
+
+==============================================================================
+GRID ABLATION  (matched total Q=400,000; N0=Q//(L+2); rho=0 always)
+==============================================================================
+Objective: maximize K=1-insuff rate on deg-3-tail at fixed Q, FALSE~0.
+      grid   L      N0    Q_real   feas  Kbar=K*  K1-insuf  FALSE-ins  FALSE-suf  meanRho
+        L4   4   66666   399,996  1.000    0.000     1.000      0.000      0.000    0.568
+        L6   6   50000   400,000  0.983    0.000     1.000      0.000      0.000    0.612
+        L9   9   36363   399,993  0.992    0.000     1.000      0.000      0.000    0.653
+  L6-near1   6   50000   400,000  0.992    0.000     1.000      0.000      0.000    0.665
+  L9-near1   9   36363   399,993  1.000    0.000     1.000      0.000      0.000    0.714
+
+  -> best grid at Q=400,000: L4 (K1-insuf=1.000, FALSE rates within delta)
+  (Grids pushing nearer rho=1 sharpen high-degree separation but lose SNR there; matched-Q picks the winner empirically.)
